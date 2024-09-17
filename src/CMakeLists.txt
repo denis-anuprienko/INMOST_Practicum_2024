@@ -10,6 +10,8 @@ add_definitions(${INMOST_DEFINITIONS})
 
 add_executable(main main.cpp)
 add_executable(mesh mesh.cpp)
+add_executable(diffusion_fem diffusion_fem.cpp)
 
 target_link_libraries(main ${INMOST_LIBRARIES})
 target_link_libraries(mesh ${INMOST_LIBRARIES})
+target_link_libraries(diffusion_fem ${INMOST_LIBRARIES})
