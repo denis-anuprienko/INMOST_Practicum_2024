@@ -4,10 +4,10 @@
 using namespace INMOST;
 using namespace std;
 
-const double dx = 1.0;
+const double dx = 5.0;
 const double dy = 1.0;
 const double dxy = 0.0;
-const double a = 8;
+const double a = 4;
 
 double C(double x, double y) // analytical solution
 {
@@ -32,7 +32,7 @@ class Problem
 {
 private:
     /// Mesh
-    Mesh& m;
+    Mesh &m;
     // =========== Tags =============
     /// Solution tag: 1 real value per cell
     Tag tagConc;
@@ -48,8 +48,6 @@ private:
     Tag tagConcAn;
     /// Global index tag: 1 integer value per cell
     Tag tagGlobInd;
-    /// Boundary conductivity: 1 real value per face, sparse on faces
-    Tag tagBCcond;
 
     // =========== Tag names ===========
     const string tagNameConc = "Concentration";
@@ -59,34 +57,23 @@ private:
     const string tagNameSource = "Source";
     const string tagNameConcAn = "Concentration_analytical";
     const string tagNameGlobInd = "Global_Index";
-    const string tagNameBCcond = "BC_conductivity";
 
 public:
-    Problem(Mesh& m_);
+    Problem(Mesh &m_);
     ~Problem();
     void initProblem();
-    void assembleGlobalSystem(Sparse::Matrix& A, Sparse::Vector& rhs);
+    void assembleGlobalSystem(Sparse::Matrix &A, Sparse::Vector &rhs);
     void run();
 };
 
-Problem::Problem(Mesh& m_) : m(m_)
+Problem::Problem(Mesh &m_) : m(m_)
 {
 }
 
 Problem::~Problem()
 {
+
 }
-
-
-double calc_tf(rMatrix const& D, rMatrix const& nf, double* dA) {
-    rMatrix DdA(2, 1);
-    DdA(0, 0) = D(0, 0) * dA[0] + D(0, 1) * dA[1];
-    DdA(1, 0) = D(1, 0) * dA[0] + D(1, 1) * dA[1];
-    double temp = (DdA(0, 0) * nf(0, 0) + DdA(1, 0) * nf(1, 0)) /
-        (dA[0] * dA[0] + dA[1] * dA[1]);
-    return temp;
-}
-
 
 void Problem::initProblem()
 {
@@ -98,14 +85,13 @@ void Problem::initProblem()
     tagSource = m.CreateTag(tagNameSource, DATA_REAL, CELL, CELL, 1);
     tagConcAn = m.CreateTag(tagNameConcAn, DATA_REAL, CELL, CELL, 1);
     tagGlobInd = m.CreateTag(tagNameGlobInd, DATA_INTEGER, CELL, NONE, 1);
-    tagBCcond = m.CreateTag(tagNameBCcond, DATA_REAL, FACE, FACE, 1);
 
     // Cell loop
     // 1. Set diffusion tensor values
     // 2. Write analytical solution and source tags
     // 3. Assign global indices
     int glob_ind = 0;
-    for (Mesh::iteratorCell icell = m.BeginCell(); icell != m.EndCell(); icell++) {
+    for(Mesh::iteratorCell icell = m.BeginCell(); icell != m.EndCell(); icell++){
         Cell c = icell->getAsCell();
         c.RealArray(tagD)[0] = dx; // Dx
         c.RealArray(tagD)[1] = dy; // Dy
@@ -120,118 +106,74 @@ void Problem::initProblem()
 
     // Face loop:
     // 1. Set BC
-    for (Mesh::iteratorFace iface = m.BeginFace(); iface != m.EndFace(); iface++) {
+    for(Mesh::iteratorFace iface = m.BeginFace(); iface != m.EndFace(); iface++){
         Face f = iface->getAsFace();
+        if(!f.Boundary())
+            continue;
+        f.Integer(tagBCtype) = BC_DIR;
         double xf[2];
         f.Barycenter(xf);
-        if (f.Boundary()) {
-            f.Integer(tagBCtype) = BC_DIR;
-            f.Real(tagBCval) = C(xf[0], xf[1]);
-        }
-        else {
-            Cell cA, cB;
-            cA = f.BackCell();
-            cB = f.FrontCell();
-            if (!cB.isValid()) {
-                std::cout << "Invalid FrontCell!" << endl;
-                exit(1);
-            }
-
-            double xA[2], xB[2];
-            cA.Barycenter(xA), cB.Barycenter(xB);
-            rMatrix nf(2, 1);
-            f.UnitNormal(nf.data());
-            double dA[2], dB[2];
-            for (int i = 0; i < 2; i++) {
-                dA[i] = xf[i] - xA[i];
-                dB[i] = xf[i] - xB[i];
-            }
-
-            rMatrix DA(2, 2);
-            DA(0, 0) = cA.RealArray(tagD)[0];
-            DA(0, 1) = cA.RealArray(tagD)[2];
-            DA(1, 0) = cA.RealArray(tagD)[2];
-            DA(1, 1) = cA.RealArray(tagD)[1];
-            double tfA = calc_tf(DA, nf, dA);
-
-            rMatrix DB(2, 2);
-            DB(0, 0) = cB.RealArray(tagD)[0];
-            DB(0, 1) = cB.RealArray(tagD)[2];
-            DB(1, 0) = cB.RealArray(tagD)[2];
-            DB(1, 1) = cB.RealArray(tagD)[1];
-            double tfB = calc_tf(DB, nf, dB);
-
-            f.Real(tagBCcond) = tfA * tfB / (tfA - tfB);
-        }
+        f.Real(tagBCval) = C(xf[0], xf[1]);
     }
 }
 
-void Problem::assembleGlobalSystem(Sparse::Matrix& M, Sparse::Vector& rhs)
+double calc_tf(rMatrix const& D, rMatrix const& nf, double *dA){
+    rMatrix DdA(2, 1);
+    DdA(0, 0) = D(0, 0) * dA[0] + D(0, 1) * dA[1];
+    DdA(1, 0) = D(1, 0) * dA[0] + D(1, 1) * dA[1];
+    double temp = (DdA(0, 0) * nf(0, 0) + DdA(1,0) * nf(1, 0)) /
+                    (dA[0]* dA[0] + dA[1] * dA[1]);
+    return temp;
+}
+
+void Problem::assembleGlobalSystem(Sparse::Matrix &A, Sparse::Vector &rhs)
 {
     // Face loop
     // Calculate transmissibilities using
     // two-point flux approximation (TPFA)
-    for (Mesh::iteratorFace iface = m.BeginFace(); iface != m.EndFace(); iface++) {
+    for(Mesh::iteratorFace iface = m.BeginFace(); iface != m.EndFace(); iface++){
         Face f = iface->getAsFace();
         double xf[2];
-        rMatrix nf(2, 1);
+        rMatrix nf(2,1);
         f.UnitNormal(nf.data());
         f.Barycenter(xf);
-        if (f.Boundary()) {
+        if(f.Boundary()){
             int BCtype = f.Integer(tagBCtype);
-            if (BCtype == BC_NEUM) {
-                continue;
+            if(BCtype == BC_NEUM){
+
             }
-            else if (BCtype == BC_DIR) {
-                // implement by yourself
-                Cell A;
-                A = f.BackCell();
-
+            else if(BCtype == BC_DIR){
+                Cell cA;
+                cA = f.BackCell();
+                double t = 0.0; // transmissibility
                 double xA[2];
-                A.Barycenter(xA);
-
-                double dA[2] = { xf[0] - xA[0], xf[1] - xA[1] };
-
-                rMatrix DA(2, 2);
-                DA(0, 0) = A.RealArray(tagD)[0];
-                DA(0, 1) = A.RealArray(tagD)[2];
-                DA(1, 0) = A.RealArray(tagD)[2];
-                DA(1, 1) = A.RealArray(tagD)[1];
-
-                double t = calc_tf(DA, nf, dA); // transmissibility
-
-                int id = A.Integer(tagGlobInd);
-                M[id][id] -= t * f.Area();
-                rhs[id] -= f.Real(tagBCval) * t * f.Area();
+                cA.Barycenter(xA);
+                double dA[2];
+                // implement by yourself
             }
         }
-        else {
+        else{
             // Internal face
             Cell cA, cB;
             cA = f.BackCell();
             cB = f.FrontCell();
-            if (!cB.isValid()) {
+            if(!cB.isValid()){
                 cout << "Invalid FrontCell!" << endl;
                 exit(1);
             }
-            // double xA[2], xB[2];
-            // cA.Barycenter(xA), cB.Barycenter(xB);
-            // double dA[2], dB[2];
+            double xA[2], xB[2];
+            cA.Barycenter(xA), cB.Barycenter(xB);
+            double dA[2], dB[2];
 
             // implement by yourself
-            double t = f.Real(tagBCcond);
-            int idA = cA.Integer(tagGlobInd);
-            int idB = cB.Integer(tagGlobInd);
-            M[idA][idA] += t * f.Area();
-            M[idA][idB] -= t * f.Area();
-            M[idB][idA] -= t * f.Area();
-            M[idB][idB] += t * f.Area();
         }
     }
-    for (auto icell = m.BeginCell(); icell != m.EndCell(); icell++) {
+    for(auto icell = m.BeginCell(); icell != m.EndCell(); icell++){
         Cell c = icell->getAsCell();
         int i = c.Integer(tagGlobInd);
-        rhs[i] -= c.Real(tagSource) * c.Volume();
+        double center[2];
+        c.Barycenter(center);
+        rhs[i] += source(center[0], center[1]) * c.Volume();
     }
 }
 
@@ -263,32 +205,31 @@ void Problem::run()
     bool solved = S.Solve(rhs, sol);
     printf("Number of iterations: %d\n", S.Iterations());
     printf("Residual:             %e\n", S.Residual());
-    if (!solved) {
+    if(!solved){
         printf("Linear solver failed: %s\n", S.GetReason().c_str());
         exit(1);
     }
 
     double normC = 0.0, normL2 = 0.0;
-    for (Mesh::iteratorCell icell = m.BeginCell(); icell != m.EndCell(); icell++) {
+    for(Mesh::iteratorCell icell = m.BeginCell(); icell != m.EndCell(); icell++){
         Cell c = icell->getAsCell();
         unsigned ind = static_cast<unsigned>(c.Integer(tagGlobInd));
         c.Real(tagConc) = sol[ind];
         double diff = fabs(c.Real(tagConc) - c.Real(tagConcAn));
         normL2 += diff * c.Volume();
         normC = max(normC, diff);
-        // std::cout << diff << "  ";
     }
-    printf("\nError C-norm:  %e\n", normC);
+    printf("Error C-norm:  %e\n", normC);
     printf("Error L2-norm: %e\n", normL2);
 
     m.Save("res.pvtk");
 }
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
-    if (argc < 2)
+    if( argc < 2 )
     {
-        printf("Usage: %s mesh_file\n", argv[0]);
+        printf("Usage: %s mesh_file\n",argv[0]);
         return -1;
     }
 
